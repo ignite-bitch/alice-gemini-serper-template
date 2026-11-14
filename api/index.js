@@ -1,4 +1,5 @@
 // Яндекс Диалоги -> Vercel -> GroqCloud (бесплатный тариф)
+// Версия 2: исправлена диагностика пустых ответов GPT-OSS.
 // Для работы требуется переменная окружения GROQ_API_KEY.
 // Поиск Serper отключён, чтобы уложиться в короткий тайм-аут Алисы.
 
@@ -14,8 +15,8 @@ const SYSTEM_PROMPT = [
   "Ты — полезный голосовой помощник в навыке Яндекс Алисы.",
   "Отвечай естественно, по-русски, кратко и так, чтобы ответ было удобно слушать.",
   "Обычно используй 1–3 коротких предложения. Не используй Markdown, таблицы и длинные вступления.",
-  "У тебя нет веб-поиска и доступа к актуальным событиям в реальном времени.",
-  "Если информация может устареть, предупреди об этом. Не придумывай факты.",
+  "На обычные вопросы отвечай на основе своих знаний, без лишних оговорок об интернете.",
+  "Если вопрос требует свежих данных, которых у тебя нет, кратко поясни ограничение. Не придумывай факты.",
   "Если не знаешь ответа, честно скажи об этом."
 ].join(" ");
 
@@ -100,10 +101,12 @@ async function askGroq(text, history, timeoutMs) {
       body: JSON.stringify({
         model,
         messages,
-        // Быстрая и короткая генерация для голосового навыка.
+        // Для GPT-OSS лимит включает токены рассуждений.
+        // При 256 токенах финальный ответ иногда не успевал сформироваться.
         reasoning_effort: "low",
         include_reasoning: false,
-        max_completion_tokens: 256
+        max_completion_tokens: 1024,
+        stream: false
       }),
       signal: controller.signal
     });
@@ -121,8 +124,18 @@ async function askGroq(text, history, timeoutMs) {
       throw new Error(`GROQ_REQUEST_FAILED_${status}`);
     }
 
-    const answer = String(data?.choices?.[0]?.message?.content ?? "").trim();
-    if (!answer) throw new Error("GROQ_EMPTY_RESPONSE");
+    const choice = data?.choices?.[0];
+    const answer = String(choice?.message?.content ?? "").trim();
+    if (!answer) {
+      // Пишем только техническую информацию, без текста диалога и секретов.
+      console.warn("Groq returned empty content:", JSON.stringify({
+        model,
+        finish_reason: choice?.finish_reason ?? null,
+        completion_tokens: data?.usage?.completion_tokens ?? null,
+        reasoning_tokens: data?.usage?.completion_tokens_details?.reasoning_tokens ?? null
+      }));
+      throw new Error("GROQ_EMPTY_RESPONSE");
+    }
     return answer;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("TIME_BUDGET_EXHAUSTED");
@@ -146,6 +159,8 @@ function errorForUser(error) {
       return "Выбранная модель Groq недоступна. Проверьте GROQ_MODEL.";
     case "TIME_BUDGET_EXHAUSTED":
       return "Не успела подготовить ответ. Попробуйте задать вопрос ещё раз.";
+    case "GROQ_EMPTY_RESPONSE":
+      return "Нейросеть не завершила ответ. Попробуйте задать вопрос ещё раз.";
     default:
       return "Не получилось получить ответ от нейросети. Попробуйте немного позже.";
   }
