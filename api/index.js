@@ -98,11 +98,9 @@ async function askGrok(text, history, timeoutMs) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model,
-        messages,
-        reasoning_effort: "none", // Для Grok 4.3: меньше задержка.
-        max_completion_tokens: 160,
-        temperature: 0.7
+  model,
+  messages
+}),
       }),
       signal: controller.signal
     });
@@ -110,8 +108,11 @@ async function askGrok(text, history, timeoutMs) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const status = response.status;
-      const detail = String(data?.error?.message || "").slice(0, 300);
-      console.error("Grok request failed with HTTP", status, detail);
+      console.error(
+  "Grok API error:",
+  status,
+  JSON.stringify(data).slice(0, 1000)
+);
       if (status === 401 || status === 403) throw new Error("GROK_KEY_REJECTED");
       if (status === 402) throw new Error("GROK_BILLING_REQUIRED");
       if (status === 429) throw new Error("GROK_QUOTA");
