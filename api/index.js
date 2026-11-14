@@ -1,14 +1,14 @@
-// Яндекс Диалоги -> Vercel -> Grok (xAI)
-// Для работы требуется переменная окружения XAI_API_KEY.
+// Яндекс Диалоги -> Vercel -> GroqCloud (бесплатный тариф)
+// Для работы требуется переменная окружения GROQ_API_KEY.
 // Поиск Serper отключён, чтобы уложиться в короткий тайм-аут Алисы.
 
-const DEFAULT_MODEL = "grok-4.3";
+const DEFAULT_MODEL = "openai/gpt-oss-20b";
 const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 180;
 const MAX_SESSION_STATE_BYTES = 950; // Лимит Яндекс Диалогов — 1024 байта.
 const MAX_ALICE_TEXT = 1024;
 const TOTAL_RESPONSE_BUDGET_MS = 3600;
-const GROK_TIMEOUT_MS = 3000;
+const GROQ_TIMEOUT_MS = 3000;
 
 const SYSTEM_PROMPT = [
   "Ты — полезный голосовой помощник в навыке Яндекс Алисы.",
@@ -70,13 +70,13 @@ function aliceResponse(text, endSession = false, history = []) {
   };
 }
 
-async function askGrok(text, history, timeoutMs) {
-  const key = process.env.XAI_API_KEY;
-  if (!key) throw new Error("MISSING_XAI_KEY");
+async function askGroq(text, history, timeoutMs) {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error("MISSING_GROQ_KEY");
   if (timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
 
-  const model = String(process.env.XAI_MODEL || DEFAULT_MODEL).trim();
-  if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
+  const model = String(process.env.GROQ_MODEL || DEFAULT_MODEL).trim();
+  if (!/^[A-Za-z0-9._/-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -91,7 +91,7 @@ async function askGrok(text, history, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), Math.max(250, timeoutMs));
 
   try {
-    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${key}`,
@@ -100,7 +100,10 @@ async function askGrok(text, history, timeoutMs) {
       body: JSON.stringify({
         model,
         messages,
-        // Минимальный запрос без необязательных параметров.
+        // Быстрая и короткая генерация для голосового навыка.
+        reasoning_effort: "low",
+        include_reasoning: false,
+        max_completion_tokens: 256
       }),
       signal: controller.signal
     });
@@ -108,18 +111,18 @@ async function askGrok(text, history, timeoutMs) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const status = response.status;
-      // Выводим тело ошибки, чтобы видеть причину отклонения запроса xAI.
+      // Выводим тело ошибки, чтобы видеть причину отклонения запроса Groq.
       // Не добавляйте секретные API-ключи в лог.
-      console.error("Grok API error:", status, JSON.stringify(data).slice(0, 1200));
-      if (status === 401 || status === 403) throw new Error("GROK_KEY_REJECTED");
-      if (status === 402) throw new Error("GROK_BILLING_REQUIRED");
-      if (status === 429) throw new Error("GROK_QUOTA");
-      if (status === 404) throw new Error("GROK_MODEL_NOT_FOUND");
-      throw new Error(`GROK_REQUEST_FAILED_${status}`);
+      console.error("Groq API error:", status, JSON.stringify(data).slice(0, 1200));
+      if (status === 401 || status === 403) throw new Error("GROQ_KEY_REJECTED");
+      if (status === 402) throw new Error("GROQ_BILLING_REQUIRED");
+      if (status === 429) throw new Error("GROQ_QUOTA");
+      if (status === 404) throw new Error("GROQ_MODEL_NOT_FOUND");
+      throw new Error(`GROQ_REQUEST_FAILED_${status}`);
     }
 
     const answer = String(data?.choices?.[0]?.message?.content ?? "").trim();
-    if (!answer) throw new Error("GROK_EMPTY_RESPONSE");
+    if (!answer) throw new Error("GROQ_EMPTY_RESPONSE");
     return answer;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("TIME_BUDGET_EXHAUSTED");
@@ -131,16 +134,16 @@ async function askGrok(text, history, timeoutMs) {
 
 function errorForUser(error) {
   switch (error?.message) {
-    case "MISSING_XAI_KEY":
-      return "Сервер пока не настроен. Проверьте переменную XAI_API_KEY в Vercel.";
-    case "GROK_KEY_REJECTED":
-      return "Не удалось подключиться к Grok. Проверьте API-ключ.";
-    case "GROK_BILLING_REQUIRED":
-      return "Для использования Grok API нужно проверить баланс и оплату в xAI.";
-    case "GROK_QUOTA":
-      return "Сейчас превышен лимит запросов к Grok. Попробуйте позже.";
-    case "GROK_MODEL_NOT_FOUND":
-      return "Выбранная модель Grok недоступна. Проверьте XAI_MODEL.";
+    case "MISSING_GROQ_KEY":
+      return "Сервер пока не настроен. Проверьте переменную GROQ_API_KEY в Vercel.";
+    case "GROQ_KEY_REJECTED":
+      return "Не удалось подключиться к Groq. Проверьте API-ключ.";
+    case "GROQ_BILLING_REQUIRED":
+      return "Проверьте доступ к модели и статус аккаунта GroqCloud.";
+    case "GROQ_QUOTA":
+      return "Сейчас превышен лимит запросов к Groq. Попробуйте позже.";
+    case "GROQ_MODEL_NOT_FOUND":
+      return "Выбранная модель Groq недоступна. Проверьте GROQ_MODEL.";
     case "TIME_BUDGET_EXHAUSTED":
       return "Не успела подготовить ответ. Попробуйте задать вопрос ещё раз.";
     default:
@@ -152,7 +155,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
-      service: "alice-grok",
+      service: "alice-groq",
       message: "Webhook is ready. Yandex Dialogs should send POST requests to /api."
     });
   }
@@ -177,10 +180,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const answer = await askGrok(
+    const answer = await askGroq(
       text,
       oldHistory,
-      Math.max(0, Math.min(GROK_TIMEOUT_MS, remainingMs() - 400))
+      Math.max(0, Math.min(GROQ_TIMEOUT_MS, remainingMs() - 400))
     );
 
     const history = compactHistory([
