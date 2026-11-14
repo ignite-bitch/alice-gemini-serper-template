@@ -98,9 +98,9 @@ async function askGrok(text, history, timeoutMs) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-  model,
-  messages
-}),
+        model,
+        messages,
+        // Минимальный запрос без необязательных параметров.
       }),
       signal: controller.signal
     });
@@ -108,11 +108,9 @@ async function askGrok(text, history, timeoutMs) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const status = response.status;
-      console.error(
-  "Grok API error:",
-  status,
-  JSON.stringify(data).slice(0, 1000)
-);
+      // Выводим тело ошибки, чтобы видеть причину отклонения запроса xAI.
+      // Не добавляйте секретные API-ключи в лог.
+      console.error("Grok API error:", status, JSON.stringify(data).slice(0, 1200));
       if (status === 401 || status === 403) throw new Error("GROK_KEY_REJECTED");
       if (status === 402) throw new Error("GROK_BILLING_REQUIRED");
       if (status === 429) throw new Error("GROK_QUOTA");
